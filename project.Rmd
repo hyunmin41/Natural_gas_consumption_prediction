@@ -1,0 +1,230 @@
+---
+title: "Untitled"
+output: html_document
+---
+# A. 어떤 상품의 수요탄력성 계수를 추정하려고 한다. 아래 절차를 따라 계수의 추정치와 그 신뢰구간을 구하고 결과를 설명하시오.
+```{r}
+library(readxl)
+setwd("/Users/kimhyunmin")
+gasdata <- read_excel("gasdata.xlsx", sheet = 'Sheet1')
+names(gasdata) <- c("Date","x","y","z")
+data <- gasdata[1:266,]
+```
+# (1) 그 상품 로그수요량 Y의 시도표를 그려보시오. 시간 축에 실제 시간이 표시되도록 한다.
+```{r}
+plot(data$y,axes=F,type="l",main="Consumption of Natural Gas")
+axis(1,at=1:266,lab=c(data$Date),las=2)
+axis(2,las=1)
+
+data$logy <- log(data$y)
+plot(data$logy,axes=F,type="l",main="log(Consumption) of Natural Gas")
+axis(1,at=1:266,lab=c(data$Date),las=2)
+axis(2,las=1)
+```
+# (2) 그 상품의 로그가격 X의 시도표를 그려보시오.
+```{r}
+plot(data$x,axes=F,type="l",main="Price of Natural Gas")
+axis(1,at=1:266,lab=c(data$Date),las=2)
+axis(2,las=1)
+
+data$logx <- log(data$x)
+plot(data$logx,axes=F,type="l",main="log(Price) of Natural Gas")
+axis(1,at=1:266,lab=c(data$Date),las=2)
+axis(2,las=1)
+```
+# (3) 위 (1), (2) 자료를 이용하여 수요탄력성의 추정치를 계산하시오.
+```{r}
+lm(logy ~ logx, data)
+```
+# (4) 위 (3)의 추정치를 개선하기위해 다른 추가 변수 Z를 하나 찾아보고, 그 시도표를 그리시오. 개선된 추정치를 구하시오.
+```{r}
+plot(data$z,axes=F,type="l",main="Producer Price Index")
+axis(1,at=1:266,lab=c(data$Date),las=2)
+axis(2,las=1)
+
+data$logz <- log(data$z)
+plot(data$logz,axes=F,type="l",main="log(Producer Price Index)")
+axis(1,at=1:266,lab=c(data$Date),las=2)
+axis(2,las=1)
+
+lm(logy ~ logx+logz, data=data)
+```
+# (5) 위 (4)에서의 회귀모형에서 오차항의 등분산성에 대한 검정을 하고, 검정 결과를 설명하시오.
+```{r}
+lm.fit <- lm(logy ~ logx+logz, data=data)
+e.square <- lm.fit$residuals^2
+data$logx.square <- data$logx^2
+data$logz.square <- data$logz^2
+white.test <- lm(e.square ~ logx+logz+logx.square+logz.square, data=data)
+summary(white.test)
+W = summary(white.test)$r.square*nrow(data)
+W
+```
+# (6) 위 (4)에서의 회귀모형에서 오차항의 무자기상관성에 대한 검정을 하고, 검정 결과를 설명하시오.
+```{r}
+library(lmtest)
+dwtest(lm.fit)
+```
+# (7) 위 (4)에서의 회귀모형에서 상수항을 beta0라 하였을 때, 모수(beta0, beta1)가 시간에 따라 변했는지 QLR 검정을 통해 판단하시오.
+```{r}
+n = length(data$y)
+ols = lm(logy ~ logx, data)
+t = seq(1:n)
+F.break = c()
+for (tau in (0.15*n):(0.85*n)){
+ D = ifelse(t <= tau, 0, 1)
+ OLS.break = lm(logy ~ 1+logx+D+logx:D, data=data)
+ F.break[tau] = anova(ols, OLS.break)$F[2]
+}
+plot(F.break, type="l")
+max(F.break[(0.15*n):(0.85*n)])
+which.max(F.break)
+```
+# (8) 추정치 베타1의 OLS 표준오차, HC 표준오차, HC 표준오차를 구하시오.
+```{r}
+lm.fit <- lm(logy ~ logx+logz, data=data)
+ols.se = summary(lm.fit)$coef[2,2]
+ols.se
+library(sandwich)
+HC.se = sqrt(vcovHC(lm.fit)[2,2])
+HC.se
+HAC.se = sqrt(vcovHAC(lm.fit)[2,2])
+HAC.se
+```
+# (9) 위 (7)의 표준오차 중 가장 적절한 것을 선택하고 선택한 이유를 설명하시오.
+```{r}
+acf(lm.fit$residual)
+```
+# (10) 수요탄력성의 95% 신뢰구간을 구하시오.
+```{r}
+CI = c(lm.fit$coefficients[[2]]-1.96*HAC.se, lm.fit$coefficients[[2]]+1.96*HAC.se)
+CI
+```
+
+# B. 위 A의 종속변수 Y를 예측하고자 한다. 마지막 시점을 T라 했을 때, 예측 대상은 Y_(T+h), h=1,2,3,4,5이다.
+# (1) ARIMA 모형에 의한 예측치를 구하고 예측치, 95% 예측 구간을 시도표에 이어서 그리시오. 모형 차수는 BIC 기준으로 정하시오.
+```{r}
+library(forecast)
+aic = c()
+for (p in 1:20){
+ ar.fit = Arima(data$logy, order=c(p,0,0), method="ML")
+ aic[p] = ar.fit$aic
+}
+which.min(aic) #15
+library(fUnitRoots)
+adfTest(data$logy, type="c", lags=14)
+
+bic = matrix(rep(0, 5*5), 5, 5)
+for (p in 1:5){
+ for (q in 1:5){
+ ari.fit = Arima(data$logy, order=c(p-1,1,q-1))
+ bic[p,q] = ari.fit$bic
+ }
+}
+bic
+
+arima.fit <- Arima(data$logy, order=c(2,1,3))
+arima.hat = forecast(arima.fit, h=5)
+arima.hat
+
+plot(arima.hat)
+```
+# (2) 변수 X, Z를 추가적으로 고려한 ADL 모형에 의한 예측치를 구하고 예측치, 95% 예측 구간을 시도표에 이어서 그리시오. 모형 차수는 BIC 기준으로 정하시오.
+```{r}
+reg <- lm(logy ~ logx+logz, data=data)
+aic = c()
+for (p in 1:20){
+ ar.z = Arima(reg$residual,
+order=c(p,0,0))
+ aic[p] = ar.z$aic
+}
+which.min(aic)
+plot(reg$residual, type="l")
+adfTest(reg$residual, type="c", lags=15)
+
+y0 = data$logy[4:266]; y1 = data$logy[3:265]; y2 = data$logy[2:264]; y3 = data$logy[1:263]
+x0 = data$logx[4:266]; x1 = data$logx[3:265]; x2 = data$logx[2:264]; x3 = data$logx[1:263]
+z0 = data$logz[4:266]; z1 = data$logz[3:265]; z2 = data$logz[2:264]; z3 = data$logz[1:263]
+dy0 = y0-y1; dy1 = y1-y2; dy2 = y2-y3
+dx0 = x0-x1; dx1 = x1-x2; dx2 = x2-x3
+dz0 = z0-z1; dz1 = z1-z2; dz2 = z2-z3
+y.hat = c()
+n = length(dy0)
+for (k in 1:5){
+ N = n-5+k
+ adl.fit = lm(dy0[1:N] ~ dy1[1:N]+dy2[1:N]+dx1[1:N]+dx2[1:N]+dz1[1:N]+dz2[1:N])
+ beta = adl.fit$coef
+ dy.hat = beta[1] + beta[2]*dy0[N] + beta[3]*dy1[N] + beta[4]*dx0[N] + beta[5]*dx1[N] + beta[6]*dz0[N] + beta[7]*dz1[N]
+ y.hat[k] = log(gasdata[[N+3,3]])+dy.hat
+}
+y.hat
+logy.data <- data[['logy']]
+list <- c(logy.data, y.hat)
+plot(list, type="l", main="Forecasts from ADL(2,2)")
+
+reduced = lm(dy0 ~ dy1+dy2)
+full = lm(dy0 ~ dy1+dy2+dx1+dx2)
+anova(reduced, full)
+```
+# (4) 변수 X, Y, Z에 대한 단위근 검정을 수행하고 결과를 설명하시오.
+```{r}
+library(forecast)
+aic = c()
+for (p in 1:20){
+ ar.fit = Arima(data$logy, order=c(p,0,0), method="ML")
+ aic[p] = ar.fit$aic
+}
+which.min(aic)
+library(fUnitRoots)
+adfTest(data$logy, type="c", lags=14)
+aic = c()
+for (p in 1:10){
+ ar.fit = Arima(data$logx, order=c(p,0,0))
+ aic[p] = ar.fit$aic
+}
+which.min(aic) #1
+adfTest(data$logx, type="c", lags=0)
+aic = c()
+for (p in 1:10){
+ ar.fit = Arima(data$logz, order=c(p,0,0))
+ aic[p] = ar.fit$aic
+}
+which.min(aic) #6
+adfTest(data$logz, type="ct", lags=5)
+```
+# (5) 변수 X, Y, Z에 대한 공적분 rank를 구하시오.
+```{r}
+library(urca)
+Data = data.frame(data$logy, data$logx, data$logz)
+johanson.test = ca.jo(Data, type="eigen", ecdet="const")
+summary(johanson.test)
+```
+# C. 위 B의 세 모형 (ARIMA 모형, ADL 모형, VAR(또는 VEC) 모형의 Y_(T+1)의 예측력을 비교해 보시오.
+```{r}
+y.arima.1 = forecast(arima.fit, h=1)$mean[1]
+e.arima.1 = log(gasdata[[267,3]])-y.arima.1
+e.arima.1
+
+beta = adl.fit$coef
+N = length(dy0)
+y.hat=c()
+dy.hat=c()
+e=c()
+dy.hat[1] = beta[1] + beta[2]*dy0[N] + beta[3]*dy1[N] + beta[4]*dx0[N] + beta[5]*dx1[N] + beta[6]*dz0[N] + beta[7]*dz1[N]
+y.hat[1] = log(gasdata[[266,3]])+dy.hat[1]
+e.adl.1 = log(gasdata[[267,3]]) - y.hat[1]
+e.adl.1
+
+library(tsDyn)
+bic = c()
+for (p in 1:10){
+ vecm.fit <- VECM(Data, lag=p, r=1, estim="ML", include="const")
+ bic[p] = summary(vecm.fit)$bic
+}
+which.min(bic) #1
+vecm.fit = VECM(Data, lag=1, r=1, estim="ML", include="const")
+vecm.hat = predict(vecm.fit, n.ahead=1)
+e.vecm.1 = log(gasdata[[267,3]])-vecm.hat[[1,1]]
+e.vecm.1
+```
+
